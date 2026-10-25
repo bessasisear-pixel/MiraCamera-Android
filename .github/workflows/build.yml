@@ -14,10 +14,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Unpack MiraCamera.zip (only if you uploaded the zip)
+      - name: Find the project (unzips any .zip in the repo)
+        id: locate
         run: |
-          if [ -f MiraCamera.zip ]; then unzip -oq MiraCamera.zip; fi
-          ls
+          find . -name "*.zip" -not -path "./.git/*" -print0 | while IFS= read -r -d '' z; do
+            echo "Unzipping: $z"
+            D="_unzipped/$(basename "$z" .zip | tr ' ' '_')"
+            mkdir -p "$D"
+            unzip -oq "$z" -d "$D"
+          done
+          S=$(find . -name settings.gradle.kts -not -path "./.git/*" | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)
+          if [ -z "$S" ]; then
+            echo "::error::No settings.gradle.kts found. Files in the repo:"
+            find . -not -path "./.git/*" | head -80
+            exit 1
+          fi
+          DIR=$(dirname "$S")
+          APK="$DIR/app/build/outputs/apk/debug/app-debug.apk"
+          APK="${APK#./}"
+          echo "Project folder: $DIR"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -29,15 +46,17 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APK
+        working-directory: ${{ steps.locate.outputs.dir }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
           name: MiraCamera-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.locate.outputs.apk }}
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Mira Camera build ${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: ${{ steps.locate.outputs.apk }}
+          
